@@ -1,0 +1,36 @@
+{
+  "name": "node-red-contrib-oztracer",
+  "version": "0.0.1",
+  "node-red": {
+    "nodes": {
+      "msg-tracer": "msg-tracer.js"
+    }
+  },
+  "scripts": {
+    "start": "build "
+  },
+  "dependencies": {
+    "config": "^3.0.1",
+    "decache": "^4.5.1",
+    "express": "^4.16.4",
+    "fs-extra": "^7.0.1",
+    "jsondiffpatch": "^0.3.11",
+    "lodash": "^4.17.11",
+    "log4js": "~3.0.6",
+    "safe-json-stringify": "^1.2.0",
+    "serve-static": "*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/raupp/node-red-contrib-oztracer.git"
+  },
+  "keywords": [
+    "node-red",
+    "node",
+    "red",
+    "msg",
+    "oztracer"
+  ],
+  "author": "Jose Raupp da Rosa Junior",
+  "license": "Apache-2.0"
+}
