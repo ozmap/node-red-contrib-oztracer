@@ -396,7 +396,7 @@ module.exports = function(RED) {
     }
 
     let patchedNodeToSupportDebugging = false;
-    RED.events.on('nodes-started', function () {
+    RED.events.on('flows:started', function () {
 
         if(!patchedNodeToSupportDebugging) {
             try {

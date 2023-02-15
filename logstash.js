@@ -1,28 +1,65 @@
-"use strict";
-const dgram = require('dgram')
-    , util = require('util')
-    , safeJsonStringify = require('safe-json-stringify');
-;
+const { HoneycombSDK } = require('@honeycombio/opentelemetry-node');
+const { context, metrics, propagation, trace } = require('@opentelemetry/api');
+const {
+    getNodeAutoInstrumentations,
+} = require('@opentelemetry/auto-instrumentations-node');
+const { Resource } = require('@opentelemetry/resources');
 
-function createLogstashUDP (host, port) {
-    const udp = dgram.createSocket('udp4');
-    return function(message, fields) {
-        const logObject = Object.assign({}, fields, {
-            '@timestamp': (new Date()).toISOString(),
-            type: 'udp_listener',
-            message: message
-        });
-        sendLog(udp, host, port, logObject);
+const nodeTypesStartSpan = [
+    "inject",
+]
+
+const nodeTypesEndSpan = [
+    
+]
+
+const sdk = new HoneycombSDK({
+    apiKey: 'K1otyjqN74KnPfwjysjZJB',
+    serviceName: 'node-red-test',
+    //debug: true,
+    instrumentations: [getNodeAutoInstrumentations()],
+    metricsDataset:
+        'node-red-test-metrics',
+    // add app level attributes to appear on every span
+    resource: new Resource({
+        'global.build_id': process.env.APP_BUILD_ID,
+    }),
+});
+
+
+sdk.start()
+    .then(() => {
+        console.log('Tracing initialized');
+    })
+    .catch((error) => {
+        console.log('Error initializing tracing', error)
+    });
+
+
+function createLogstashUDP(host, port) {
+    return function (message, fields) {
+        sendLog(message, fields);
     };
 }
 
-function sendLog(udp, host, port, logObject) {
-    const buffer = new Buffer(safeJsonStringify(logObject));
-    udp.send(buffer, 0, buffer.length, port, host, function(err /*, bytes */) {
-        if(err) {
-            console.error("LogstashUDP - %s:%p Error: %s", host, port, util.inspect(err));
-        }
-    });
+function sendLog(message, fields) {
+    console.log("--------------- Iniciando log---------------------------------", message, '--->', fields);
+
+    if(nodeTypesStartSpan.includes(fields.nodered_tracer_step.node.type)){
+        fields.nodered_tracer_step.node.msg.spanIdPai = 1;
+    }
+
+
+    try {
+        const tracer = trace.getTracer('message');
+        tracer.startActiveSpan('sleep', (span) => {
+            span.setAttribute('message', fields.nodered_tracer_step);
+            span.end();
+        })
+    } catch (e) {
+        console.error(e);
+    }
+
 }
 
 module.exports = createLogstashUDP;
