@@ -1,39 +1,31 @@
-const { HoneycombSDK } = require('@honeycombio/opentelemetry-node');
 const { context, metrics, propagation, trace } = require('@opentelemetry/api');
-const {
-    getNodeAutoInstrumentations,
-} = require('@opentelemetry/auto-instrumentations-node');
 const { Resource } = require('@opentelemetry/resources');
+const { SemanticResourceAttributes } = require('@opentelemetry/semantic-conventions');
+const { BasicTracerProvider, ConsoleSpanExporter, SimpleSpanProcessor } = require('@opentelemetry/sdk-trace-base');
+const { OTLPTraceExporter }  = require('@opentelemetry/exporter-trace-otlp-http');
 
-const nodeTypesStartSpan = [
-    "inject",
-]
+const provider = new BasicTracerProvider({
+    resource: new Resource({
+      [SemanticResourceAttributes.SERVICE_NAME]: 'basic-service',
+    }),
+  });
+
+  const collectorOptions = {
+    url: 'http://devops.ozmap.com.br:4318/v1/traces'
+  };
+
+  provider.addSpanProcessor(new SimpleSpanProcessor(new ConsoleSpanExporter()));
+  provider.addSpanProcessor(new SimpleSpanProcessor(new OTLPTraceExporter(collectorOptions)));
+
+  provider.register();
+
+  const tracer = trace.getTracer('node-red-machine');
+
+  let mainSpan = null;
 
 const nodeTypesEndSpan = [
     
 ]
-
-const sdk = new HoneycombSDK({
-    apiKey: 'K1otyjqN74KnPfwjysjZJB',
-    serviceName: 'node-red-test',
-    //debug: true,
-    instrumentations: [getNodeAutoInstrumentations()],
-    metricsDataset:
-        'node-red-test-metrics',
-    // add app level attributes to appear on every span
-    resource: new Resource({
-        'global.build_id': process.env.APP_BUILD_ID,
-    }),
-});
-
-
-sdk.start()
-    .then(() => {
-        console.log('Tracing initialized');
-    })
-    .catch((error) => {
-        console.log('Error initializing tracing', error)
-    });
 
 
 function createLogstashUDP(host, port) {
@@ -43,21 +35,19 @@ function createLogstashUDP(host, port) {
 }
 
 function sendLog(message, fields) {
-    console.log("--------------- Iniciando log---------------------------------", message, '--->', fields);
-
-    if(nodeTypesStartSpan.includes(fields.nodered_tracer_step.node.type)){
-        fields.nodered_tracer_step.node.msg.spanIdPai = 1;
+    if(!mainSpan){
+        mainSpan = tracer.startSpan('main');
     }
+    const ctx = trace.setSpan(context.active(), mainSpan);
+    const span = tracer.startSpan('doWork', undefined, ctx);
+    span.setAttribute('key', fields.nodered_tracer_step.msg);
+        console.log("--------------- Iniciando log---------------------------------", message, '--->', fields);
+    span.addEvent('invoking doWork');
+    span.end();
 
-
-    try {
-        const tracer = trace.getTracer('message');
-        tracer.startActiveSpan('sleep', (span) => {
-            span.setAttribute('message', fields.nodered_tracer_step);
-            span.end();
-        })
-    } catch (e) {
-        console.error(e);
+    if(fields.nodered_tracer_step.node.type=="http response"){
+        mainSpan.end();
+        mainSpan = null;
     }
 
 }
