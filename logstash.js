@@ -18,10 +18,6 @@ provider.addSpanProcessor(new SimpleSpanProcessor(new ConsoleSpanExporter()));
 provider.addSpanProcessor(new SimpleSpanProcessor(new OTLPTraceExporter(collectorOptions)));
 provider.register();
 
-const tracer = trace.getTracer('node-red-machine');
-let mainSpan = null;
-const nodeTypesEndSpan = []
-
 function createLogstashUDP(host, port) {
     return function (message, fields) {
         sendLog(message, fields);
