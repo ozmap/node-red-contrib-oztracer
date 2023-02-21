@@ -63,12 +63,22 @@ module.exports = function (RED) {
     });
 
     function checkAllParentSpanIsReadyToCloseRecursive(){
+        console.log("->",messagesToTrace);
         for(let msgId in messagesToTrace){ 
             checkIfParentSpanIsReadyToClose(msgId);
         }
-        setTimeout(checkAllParentSpanIsReadyToCloseRecursive, 5000);
+        setTimeout(checkAllParentSpanIsReadyToCloseRecursive, 10000);
     }
 
+    //Limpa a memoria das mensagens que já foram/deveriam ter sido terminadas
+    function deleteOldMessageSpans(msgId){
+        this.msgId = msgId;
+        setTimeout(()=>{
+            delete messagesToTrace[msgId];
+        },15*60*1000); //15 minutos
+    }
+
+    //Verifica se todos as spans que foram criadas dentro da span pai estão terminadas, e solicita pra terminar a pai
     function checkIfParentSpanIsReadyToClose(msgId){
         let spans = messagesToTrace[msgId].spans;
         let readyToClose = true;
@@ -82,10 +92,24 @@ module.exports = function (RED) {
         if(readyToClose){
             messagesToTrace[msgId].parentSpan.setStatus({ code: SpanStatusCode.OK });
             messagesToTrace[msgId].parentSpan.end();
-            delete messagesToTrace[msgId];
+            //Limpar apenas depois de varios minutos para garantir que nenhuma mensagem perdida não esteja esperano pra retornar
+            deleteOldMessageSpans(msgId);
         }
     }
 
+    /**
+     * Caso a span parant ainda não exista, cria uma span raiz e adiciona umaa span filha com a mensagem atual
+     * Se a span parant ja existir, só adiciona a nova span na parent
+     * @param {*} tracer 
+     * @param {*} nodeId 
+     * @param {*} msgId 
+     * @param {*} nodeName 
+     * @param {*} flowName 
+     * @param {*} node 
+     * @param {*} msg 
+     * @param {*} sourceNode 
+     * @returns undefined
+     */
     function createParentOrSpanBase(tracer, nodeId, msgId, nodeName, flowName, node, msg, sourceNode) {
         if(node.type === 'debug'){
             //se for nó de debug, podemos ignorar;
@@ -93,7 +117,6 @@ module.exports = function (RED) {
         }
 
         if(node.type === 'split'){
-            console.log("Splitter", node, msg)
             msg.ozParentMessageId = msgId;
         }
 
@@ -124,7 +147,21 @@ module.exports = function (RED) {
 
     }
 
+    /**
+     * Eventos bas mensagens
+     *  onSend - a node has called send with one or more messages.
+     *  preRoute - a message is about to be routed to its destination.
+     *  preDeliver - a message is about to be delivered
+     *  postDeliver - a message has been dispatched to its destination
+     *  onReceive - a message is about to be received by a node
+     *  postReceive - a message has been received by a node
+     *  onComplete - a node has completed with a message or logged an error for it
+    */
 
+    /**
+     * Adiciona um listner para criar span parent quando a mensagem não é criada/passada internamente.
+     * Por exemplo, quando um httpin ou um inject são chamados
+     */
     RED.hooks.add("preRoute", (sendEvents) => {
         let evt = sendEvents;
         let source = evt.source
@@ -178,6 +215,10 @@ module.exports = function (RED) {
             //*/
     });
 
+    /**
+     * Adiciona um listner para criar span dentro do parent quando uma nova mensagem chega no node.
+     * Este evento sempre ocorre de um node pra outro, mas não ocorre quando a chamada é externa, ex: httpin
+     */
     RED.hooks.add("postDeliver", (sentEvent) => {
         let msg = sentEvent.msg;
         let msgId = msg._msgid;
@@ -188,9 +229,7 @@ module.exports = function (RED) {
         let tracer = flow.tracer;
         let id = node.id;
         let sourceNode = sentEvent.source.node;
-        let sourceId = sourceNode.id
-
-        console.log("postDeliver", node.name, msgId, node.type)
+        let sourceId = sourceNode.id;
 
         //Pode ser que a mensagem seja criada no meio do caminho, se este for o caso, vamos
         //tentar ver elas e criar um span
