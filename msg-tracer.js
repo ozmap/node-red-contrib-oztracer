@@ -1,9 +1,8 @@
-const { context, metrics, propagation, trace, SpanStatusCode } = require('@opentelemetry/api');
+const { context, metrics, propagation, SpanStatusCode, trace } = require('@opentelemetry/api');
 const { Resource } = require('@opentelemetry/resources');
 const { SemanticResourceAttributes } = require('@opentelemetry/semantic-conventions');
-const { BasicTracerProvider, ConsoleSpanExporter, SimpleSpanProcessor, AlwaysOnSampler } = require('@opentelemetry/sdk-trace-base');
+const { BasicTracerProvider, ConsoleSpanExporter, SimpleSpanProcessor, AlwaysOnSampler, BatchSpanProcessor } = require('@opentelemetry/sdk-trace-base');
 const { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-http');
-const tracer = trace.getTracer('node-red-machine');
 const path = require('path');
 const bodyParser = require('body-parser');
 const fs = require('fs');
@@ -20,17 +19,17 @@ const collectorOptions = {
 const oTLPTraceExporter = new OTLPTraceExporter(collectorOptions);
 const spanProcessor = new SimpleSpanProcessor(oTLPTraceExporter);
 
-function createTracer(node){    
+function createTracer(node) {
     let name = node.name || node.label;
     const provider = new BasicTracerProvider({
-        generalLimits:{
+        generalLimits: {
             attributeValueLengthLimit: 2048,
             attributeCountLimit: 256
         },
-        spanLimits:{
+        spanLimits: {
             attributeValueLengthLimit: 2048,
-            attributeCountLimit:256,
-            linkCountLimit:256,
+            attributeCountLimit: 256,
+            linkCountLimit: 256,
             eventCountLimit: 256
         },
         sampler: new AlwaysOnSampler(),
@@ -38,14 +37,10 @@ function createTracer(node){
             [SemanticResourceAttributes.SERVICE_NAME]: name,
         }),
     });
-    
-    provider.addSpanProcessor(new SimpleSpanProcessor(new ConsoleSpanExporter()));
     provider.addSpanProcessor(spanProcessor);
     provider.register();
-
     return provider.getTracer(name);
 }
-
 
 module.exports = function (RED) {
     const msgTracerConfigFolderPath = path.resolve(RED.settings.userDir, 'msg-tracer-config');
@@ -65,62 +60,85 @@ module.exports = function (RED) {
         });
     });
 
-    RED.hooks.add("onSend", (sendEvents) => {
-        let evt = sendEvents[0];
+    RED.hooks.add("preRoute", (sendEvents) => {
+        let evt = sendEvents;
         let source = evt.source
         let node = source.node;
         let msg = evt.msg;
-        let flowId = source.node.z;
+        let flowId = node.z;
         let flow = flows[flowId];
         let tracer = flow.tracer;
 
-        //Primeira vez neste flow, vamos criar o span pai
-        if (!msg.OZParentSpan) {
-            msg.OZParentSpan = tracer.startSpan(flow.name);
-        }
-        //inicio do calculo do custo do span
-        const ctx = trace.setSpan(context.active(), msg.OZParentSpan);
-        msg.OZSpan = tracer.startSpan(node.name, flow.name, ctx);
-        if(node.type === 'http in' && msg.req){
-            msg.OZSpan.setAttribute("headers", JSON.stringify(msg.req.headers));
-            msg.OZSpan.setAttribute("params", JSON.stringify(msg.req.params));
-            msg.OZSpan.setAttribute("query", JSON.stringify(msg.req.query));
-            msg.OZSpan.setAttribute("body", JSON.stringify(msg.req.body));
-        }else{
-            msg.OZSpan.setAttribute("message", JSON.stringify(msg.payload));
+        //se for um http-in ou inject, vamos criar o span pai
+        if ((node.type === 'http in' || node.type === 'inject')) {
+            if (!msg.OZParentSpan) {
+                msg.OZParentSpan = tracer.startSpan(flow.name);
+            }
+            const ctx = trace.setSpan(context.active(), msg.OZParentSpan);
+            msg.OZSpan = {};
+            for (let id of node.wires[0]) {
+                msg.OZSpan[id] = tracer.startSpan(node.name, flow.name, ctx);
+                if (msg.req) {
+                    msg.OZSpan[id].setAttribute("headers", JSON.stringify(msg.req.headers));
+                    msg.OZSpan[id].setAttribute("params", JSON.stringify(msg.req.params));
+                    msg.OZSpan[id].setAttribute("query", JSON.stringify(msg.req.query));
+                    msg.OZSpan[id].setAttribute("body", JSON.stringify(msg.req.body));
+                } else {
+                    msg.OZSpan[id].setAttribute("message", JSON.stringify(msg.payload));
+                }
+            }
         }
     });
 
-    // Quando uma mensagem chega no nó, é hora de terminar o span começado no incio,
-    // Se for on nó http response, ta na hora de terminar o span pai também
     RED.hooks.add("onReceive", (receiveEvent) => {
         let msg = receiveEvent.msg;
         let destination = receiveEvent.destination;
         let node = destination.node;
+        let flowId = node.z;
+        let flow = flows[flowId];
+        let tracer = flow.tracer;
+        let id = node.id;
 
-        if (msg.OZSpan) {
-            msg.OZSpan.setStatus({code: SpanStatusCode.OK});
-            msg.OZSpan.end();
-        }
-        if (msg.OZParentSpan && node.type === 'http response') {
-            msg.OZParentSpan.setStatus({code: SpanStatusCode.OK});
-            msg.OZParentSpan.end()
+        console.log(node.name,node.wires, "<--------------");
+        
+        if (!node.type.startsWith('subflow:') && !node.type.startsWith('link out') && !node.type.startsWith('link in')) {
+            if (msg.OZSpan && msg.OZSpan[id]) {
+                msg.OZSpan[id].setStatus({ code: SpanStatusCode.OK });
+                msg.OZSpan[id].end();
+            }
+            if (msg.OZParentSpan && node.type !== 'http response') {
+                const ctx = trace.setSpan(context.active(), msg.OZParentSpan);
+                if(!msg.OZSpan){
+                    msg.OZSpan = {};
+                }
+                if(node.wires.length > 0 ){ //esta ligado a algum outro nó
+                    for (let wiresId of node.wires[0]) {
+                        msg.OZSpan[wiresId] = tracer.startSpan(node.name, flow.name, ctx);
+                    }
+                }
+            }
+            if (msg.OZParentSpan && node.type === 'http response') {
+                msg.OZParentSpan.setStatus({ code: SpanStatusCode.OK });
+                msg.OZParentSpan.end()
+            }
         }
     });
 
     // Example onComplete hook
     RED.hooks.add("onComplete", (completeEvent) => {
+        let node = completeEvent.node.node;
+        let id = node.id;
+
         if (completeEvent.error) {
-            completeEvent.msg.OZSpan.setStatus({code: SpanStatusCode.ERROR});
-            completeEvent.msg.OZSpan.end();
-            
-            completeEvent.msg.OZParentSpan.setAttribute("error-message", completeEvent.error);
-            completeEvent.msg.OZParentSpan.setStatus({code: SpanStatusCode.ERROR});
+            completeEvent.msg.OZSpan[id].setStatus({ code: SpanStatusCode.ERROR });
+            completeEvent.msg.OZSpan[id].setAttribute("error-message", completeEvent.error);
+            completeEvent.msg.OZSpan[id].end();
+
+            completeEvent.msg.OZParentSpan.setStatus({ code: SpanStatusCode.ERROR });
             completeEvent.msg.OZParentSpan.end()
 
             completeEvent.msg.OZParentSpan = null;
-            completeEvent.msg.OZSpan = null
+            completeEvent.msg.OZSpan = null;
         }
     });
-
 };
