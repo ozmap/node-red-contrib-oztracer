@@ -86,25 +86,26 @@ module.exports = function (RED) {
         }
     }
 
-    function createParentOrSpanBase(tracer, nodeId, msgId, nodeName, flowName, node, msg) {
+    function createParentOrSpanBase(tracer, nodeId, msgId, nodeName, flowName, node, msg, sourceNode) {
         if(node.type === 'debug'){
             //se for nó de debug, podemos ignorar;
             return;
         }
-        if(msg.parts && msg.parts.id){
-            //É uma mensagem criada por um splitter
 
-            console.log("splitter", messagesToTrace[msg.parts.id])
+        if(node.type === 'split'){
+            console.log("Splitter", node, msg)
+            msg.ozParentMessageId = msgId;
+        }
 
-            /** 
+        if(sourceNode && sourceNode.type === 'split' && msg.ozParentMessageId){
+            //É uma mensagem criada por um splitter            
             if (!messagesToTrace[msgId]) {
                 messagesToTrace[msgId] = {
-                    parentSpan: messagesToTrace[msg.parts.id].parentSpan,
-                    ctx: messagesToTrace[msg.parts.id].ctx,
-                    spans: messagesToTrace[msg.parts.id].spans
+                    parentSpan: messagesToTrace[msg.ozParentMessageId].parentSpan,
+                    ctx: messagesToTrace[msg.ozParentMessageId].ctx,
+                    spans: messagesToTrace[msg.ozParentMessageId].spans
                 }
             }
-            **/
         }
 
         if (!messagesToTrace[msgId]) {
@@ -137,8 +138,8 @@ module.exports = function (RED) {
 
         //Somente necessário para pegar o evento que vem do http-in, já que ele não vem de outra mensagem
         if ((node.type === 'http in' || node.type === 'inject')) {
-            //Caso a mensagem ainda não tenha trace, criar a base do trace
-            createParentOrSpanBase(tracer, id, msgId, node.name, flow.name, node, msg)
+            //Caso a mensagem ainda não tenha trace, criar a base do trace, não tem origim interna, src null
+            createParentOrSpanBase(tracer, id, msgId, node.name, flow.name, node, msg, null)
         }
 
         /**
@@ -177,24 +178,24 @@ module.exports = function (RED) {
             //*/
     });
 
-    RED.hooks.add("postDeliver", (receiveEvent) => {
-        let msg = receiveEvent.msg;
+    RED.hooks.add("postDeliver", (sentEvent) => {
+        let msg = sentEvent.msg;
         let msgId = msg._msgid;
-        let destination = receiveEvent.destination;
+        let destination = sentEvent.destination;
         let node = destination.node;
         let flowId = node.z;
         let flow = flows[flowId];
         let tracer = flow.tracer;
         let id = node.id;
-        let sourceNode = receiveEvent.source.node;
-        let sourceId = sourceNode.id;
+        let sourceNode = sentEvent.source.node;
+        let sourceId = sourceNode.id
 
         console.log("postDeliver", node.name, msgId, node.type)
 
         //Pode ser que a mensagem seja criada no meio do caminho, se este for o caso, vamos
         //tentar ver elas e criar um span
         if(!messagesToTrace[msgId]){
-            createParentOrSpanBase(tracer, id, msgId, node.name, flow.name, node, msg);
+            createParentOrSpanBase(tracer, id, msgId, node.name, flow.name, node, msg, sourceNode);
         }
 
         //Vamos terminar o span do source se ainda não estiver parado
@@ -218,11 +219,11 @@ module.exports = function (RED) {
         let tracer = flow.tracer;
         let id = node.id;
 
-        console.log("onReceive", node.name)
+        console.log("onReceive", id, node.name)
 
         //Acabamos de receber a mensagem neste nó, vamos criar uma span pra ela se não for nó debug
         
-        createParentOrSpanBase(tracer, id, msgId, node.name, flow.name, node, msg);
+        createParentOrSpanBase(tracer, id, msgId, node.name, flow.name, node, msg, null);
 
 
         /**
