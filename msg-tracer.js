@@ -1,7 +1,7 @@
 const { context, metrics, propagation, SpanStatusCode, trace } = require('@opentelemetry/api');
 const { Resource } = require('@opentelemetry/resources');
 const { SemanticResourceAttributes } = require('@opentelemetry/semantic-conventions');
-const { BasicTracerProvider, ConsoleSpanExporter, SimpleSpanProcessor, AlwaysOnSampler, BatchSpanProcessor } = require('@opentelemetry/sdk-trace-base');
+const { BasicTracerProvider, AlwaysOnSampler, BatchSpanProcessor } = require('@opentelemetry/sdk-trace-base');
 const { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-http');
 const path = require('path');
 const bodyParser = require('body-parser');
@@ -18,30 +18,7 @@ const collectorOptions = {
     url: 'http://mhnet.ozmap.com.br:4318/v1/traces'
 };
 const oTLPTraceExporter = new OTLPTraceExporter(collectorOptions);
-const spanProcessor = new SimpleSpanProcessor(oTLPTraceExporter);
-
-function createTracer(node) {
-    let name = node.name || node.label;
-    const provider = new BasicTracerProvider({
-        generalLimits: {
-            attributeValueLengthLimit: 2048,
-            attributeCountLimit: 256
-        },
-        spanLimits: {
-            attributeValueLengthLimit: 2048,
-            attributeCountLimit: 256,
-            linkCountLimit: 256,
-            eventCountLimit: 256
-        },
-        sampler: new AlwaysOnSampler(),
-        resource: new Resource({
-            [SemanticResourceAttributes.SERVICE_NAME]: name,
-        }),
-    });
-    provider.addSpanProcessor(spanProcessor);
-    provider.register();
-    return provider.getTracer(name);
-}
+const spanProcessor = new BatchSpanProcessor(oTLPTraceExporter);
 
 module.exports = function (RED) {
     const msgTracerConfigFolderPath = path.resolve(RED.settings.userDir, 'msg-tracer-config');
@@ -51,7 +28,6 @@ module.exports = function (RED) {
         await fse.ensureDir(msgTracerConfigFolderPath);
         fs.writeFile(msgTracerConfigPath, JSON.stringify(flowManagerConfig), 'utf8', function () { });
     };
-
     RED.events.on('flows:started', function () {
         RED.nodes.eachNode(function (node) {
             if (node.type === 'tab' || node.type.startsWith('subflow:')) {
@@ -62,39 +38,61 @@ module.exports = function (RED) {
         checkAllParentSpanIsReadyToCloseRecursive();
     });
 
-    function checkAllParentSpanIsReadyToCloseRecursive(){
-        console.log("->",messagesToTrace);
-        for(let msgId in messagesToTrace){ 
+    function checkAllParentSpanIsReadyToCloseRecursive() {
+        for (let msgId in messagesToTrace) {
             checkIfParentSpanIsReadyToClose(msgId);
         }
         setTimeout(checkAllParentSpanIsReadyToCloseRecursive, 10000);
     }
 
     //Limpa a memoria das mensagens que já foram/deveriam ter sido terminadas
-    function deleteOldMessageSpans(msgId){
+    function deleteOldMessageSpans(msgId) {
         this.msgId = msgId;
-        setTimeout(()=>{
+        setTimeout(() => {
             delete messagesToTrace[msgId];
-        },15*60*1000); //15 minutos
+        }, 15 * 60 * 1000); //15 minutos
     }
 
     //Verifica se todos as spans que foram criadas dentro da span pai estão terminadas, e solicita pra terminar a pai
-    function checkIfParentSpanIsReadyToClose(msgId){
+    function checkIfParentSpanIsReadyToClose(msgId) {
         let spans = messagesToTrace[msgId].spans;
         let readyToClose = true;
-        for(let spanIdx in spans){ 
-            if(spans[spanIdx].active){
+        for (let spanIdx in spans) {
+            if (spans[spanIdx].active) {
                 //ainda tem ativos, ignorar;
                 readyToClose = false;
                 return;
             }
         }
-        if(readyToClose){
+        if (readyToClose) {
             messagesToTrace[msgId].parentSpan.setStatus({ code: SpanStatusCode.OK });
             messagesToTrace[msgId].parentSpan.end();
             //Limpar apenas depois de varios minutos para garantir que nenhuma mensagem perdida não esteja esperano pra retornar
             deleteOldMessageSpans(msgId);
         }
+    }
+
+    function createTracer(node) {
+        let name = node.name || node.label;
+        const provider = new BasicTracerProvider({
+            generalLimits: {
+                attributeValueLengthLimit: 2048,
+                attributeCountLimit: 256
+            },
+            spanLimits: {
+                attributeValueLengthLimit: 2048,
+                attributeCountLimit: 256,
+                linkCountLimit: 256,
+                eventCountLimit: 256
+            },
+            sampler: new AlwaysOnSampler(),
+            resource: new Resource({
+                [SemanticResourceAttributes.SERVICE_NAME]: name,
+            }),
+        });
+        provider.addSpanProcessor(spanProcessor);
+        provider.register();
+        return provider.getTracer('oztracer');
     }
 
     /**
@@ -110,17 +108,16 @@ module.exports = function (RED) {
      * @param {*} sourceNode 
      * @returns undefined
      */
-    function createParentOrSpanBase(tracer, nodeId, msgId, nodeName, flowName, node, msg, sourceNode) {
-        if(node.type === 'debug'){
-            //se for nó de debug, podemos ignorar;
+    function createParentOrSpanBase(tracer, nodeId, msgId, nodeName, flowName, node, msg, sourceNode, propagationHeaders) {
+        if (node.type === 'debug') { //se for nó de debug, podemos ignorar;
             return;
         }
 
-        if(node.type === 'split'){
+        if (node.type === 'split') { //para evitar que fiquem span perdidas, salvamos o id da mensagem anterior
             msg.ozParentMessageId = msgId;
         }
 
-        if(sourceNode && sourceNode.type === 'split' && msg.ozParentMessageId){
+        if (sourceNode && sourceNode.type === 'split' && msg.ozParentMessageId) {
             //É uma mensagem criada por um splitter            
             if (!messagesToTrace[msgId]) {
                 messagesToTrace[msgId] = {
@@ -129,26 +126,41 @@ module.exports = function (RED) {
                     spans: messagesToTrace[msg.ozParentMessageId].spans
                 }
             }
+            delete msg.ozParentMessageId; //apagar dado da mesnagem pra evitar 'sujar' a mensagem
         }
 
+        let activeContext = context.active();
+        let first = false;
         if (!messagesToTrace[msgId]) {
-            let parentSpan = tracer.startSpan(flowName);
+            first = true;
+            let fromRemote = false;
+            if (propagationHeaders) {
+                activeContext = propagation.extract(context.active(), propagationHeaders);
+                const spanContext = trace.getSpanContext(activeContext);
+                trace.setSpan(activeContext, spanContext);
+                fromRemote = true;
+            }
+            let parentSpan = tracer.startSpan(flowName, {
+                attributes: {}
+            }, activeContext);
             messagesToTrace[msgId] = {
                 parentSpan: parentSpan,
-                ctx: trace.setSpan(context.active(), parentSpan),
+                ctx: fromRemote ? activeContext : trace.setSpan(activeContext, parentSpan),
                 spans: {}
             }
-        }        
+        }
         //Criar o Span para este nó
         messagesToTrace[msgId].spans[nodeId] = {
-            span: tracer.startSpan(nodeName, flowName, messagesToTrace[msgId]['ctx']),
+            span: tracer.startSpan(nodeName, {
+                attributes: {}
+            }, messagesToTrace[msgId]['ctx']),
             active: true
         }
-
+        messagesToTrace[msgId].ctx = trace.setSpan(activeContext, messagesToTrace[msgId].spans[nodeId].span);
     }
 
     /**
-     * Eventos bas mensagens
+     *  Hooks para as mensagens
      *  onSend - a node has called send with one or more messages.
      *  preRoute - a message is about to be routed to its destination.
      *  preDeliver - a message is about to be delivered
@@ -175,8 +187,16 @@ module.exports = function (RED) {
 
         //Somente necessário para pegar o evento que vem do http-in, já que ele não vem de outra mensagem
         if ((node.type === 'http in' || node.type === 'inject')) {
+            //Se vier de um http in, podemos pegar o traceid do client
+            let propagationHeaders = null;
+            if (node.type === 'http in' && msg.req.headers) {
+                propagationHeaders = {
+                    traceparent: msg.req.headers.traceparent,
+                    tracestate: msg.req.headers.tracestate
+                }
+            }
             //Caso a mensagem ainda não tenha trace, criar a base do trace, não tem origim interna, src null
-            createParentOrSpanBase(tracer, id, msgId, node.name, flow.name, node, msg, null)
+            createParentOrSpanBase(tracer, id, msgId, node.name, flow.name, node, msg, null, propagationHeaders)
         }
 
         /**
@@ -215,6 +235,8 @@ module.exports = function (RED) {
             //*/
     });
 
+
+
     /**
      * Adiciona um listner para criar span dentro do parent quando uma nova mensagem chega no node.
      * Este evento sempre ocorre de um node pra outro, mas não ocorre quando a chamada é externa, ex: httpin
@@ -223,18 +245,30 @@ module.exports = function (RED) {
         let msg = sentEvent.msg;
         let msgId = msg._msgid;
         let destination = sentEvent.destination;
-        let node = destination.node;
+        let destinationNode = destination.node;
+        let node = sentEvent.source.node;
+        let sourceId = node.id;
+        let id = node.id;
         let flowId = node.z;
         let flow = flows[flowId];
         let tracer = flow.tracer;
-        let id = node.id;
-        let sourceNode = sentEvent.source.node;
-        let sourceId = sourceNode.id;
 
-        //Pode ser que a mensagem seja criada no meio do caminho, se este for o caso, vamos
-        //tentar ver elas e criar um span
-        if(!messagesToTrace[msgId]){
-            createParentOrSpanBase(tracer, id, msgId, node.name, flow.name, node, msg, sourceNode);
+        //console.log("postDeliver", id, node.name, sourceNode.type, destination.node.type)
+        if (destinationNode.type === 'http request' && messagesToTrace[msgId]) {
+            if (!sentEvent.msg.headers) {
+                sentEvent.msg.headers = {}
+            }
+            if (!sentEvent.msg.headers.traceparent) {
+                const output = {};
+                propagation.inject(messagesToTrace[msgId].ctx, output);
+                sentEvent.msg.headers.traceparent = output.traceparent;
+                sentEvent.msg.headers.tracestate = output.tracestate;
+            }
+        }
+
+        //Pode ser que a mensagem seja criada no meio do caminho, se este for o caso, vamos tentar ver elas e criar um span
+        if (!messagesToTrace[msgId]) {
+            createParentOrSpanBase(tracer, id, msgId, node.name, flow.name, destinationNode, msg, node, null);
         }
 
         //Vamos terminar o span do source se ainda não estiver parado
@@ -244,9 +278,8 @@ module.exports = function (RED) {
             sourceSpan.span.end();
             sourceSpan.active = false;
         }
+
     });
-
-
 
     RED.hooks.add("onReceive", (receiveEvent) => {
         let msg = receiveEvent.msg;
@@ -258,44 +291,24 @@ module.exports = function (RED) {
         let tracer = flow.tracer;
         let id = node.id;
 
-        console.log("onReceive", id, node.name)
+        //console.log("onReceive", id, node.name, node.type, msg)
 
-        //Acabamos de receber a mensagem neste nó, vamos criar uma span pra ela se não for nó debug
-        
-        createParentOrSpanBase(tracer, id, msgId, node.name, flow.name, node, msg, null);
-
-
-        /**
-        console.log(node.name,node.wires, "<--------------");
-        
-        if (!node.type.startsWith('subflow:') && !node.type.startsWith('link out') && !node.type.startsWith('link in')) {
-            if (msg.OZSpan && msg.OZSpan[id]) {
-                msg.OZSpan[id].setStatus({ code: SpanStatusCode.OK });
-                msg.OZSpan[id].end();
-            }
-            if (msg.OZParentSpan && node.type !== 'http response') {
-                const ctx = trace.setSpan(context.active(), msg.OZParentSpan);
-                if(!msg.OZSpan){
-                    msg.OZSpan = {};
-                }
-                if(node.wires.length > 0 ){ //esta ligado a algum outro nó
-                    for (let wiresId of node.wires[0]) {
-                        msg.OZSpan[wiresId] = tracer.startSpan(node.name, flow.name, ctx);
-                    }
-                }
-            }
-            if (msg.OZParentSpan && node.type === 'http response') {
-                msg.OZParentSpan.setStatus({ code: SpanStatusCode.OK });
-                msg.OZParentSpan.end()
-            }
-        }
-        //*/
+        createParentOrSpanBase(tracer, id, msgId, node.name, flow.name, node, msg, null, null);
     });
 
     // Example onComplete hook
     RED.hooks.add("onComplete", (completeEvent) => {
+        let msg = completeEvent.msg;
         let node = completeEvent.node.node;
         let id = node.id;
+
+        /**
+        .setStatus({
+            code: SpanStatusCode.ERROR,
+            message: err.message,
+          });
+
+        //console.log("onComplete", id, node.name, node.type, msg)
 
         /** 
         if (completeEvent.error) {

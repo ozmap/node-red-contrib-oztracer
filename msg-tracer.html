@@ -26,14 +26,12 @@
         }
 
         let content = `
-
             <div id="tracer-tabs">
               <ul>
-                <li><a href="#tracer-tabs-debug">Debug</a></li>
-                <li><a href="#tracer-tabs-route">Route</a></li>
+                <li><a href="#tracer-tabs-config">Config</a></li>
               </ul>
 
-              <div id="tracer-tabs-debug">
+              <div id="tracer-tabs-config">
                 <br style="margin-top: 5pt"/>
 
                 <button class="toggle-bp-button" id="toggleBp"><i class="fa fa-stop-circle-o"></i></button>
@@ -51,61 +49,10 @@
                 </div>
               </div>
 
-              <div id="tracer-tabs-route">
-                <div style="margin-top: 5pt"></div>
-                <button id="node-route-toggle-btn" style="width:70%;text-align: center">(Loading State...)</button>
-                <button id="node-route-clear-btn" style="width:20pt; text-align: center; color: darkred">
-                    <i class="fa fa-remove"></i>
-                </button>
-                <button id="node-route-settings-btn" style="width:20pt; text-align: center;">
-                    <i class="fa fa-cog"></i>
-                </button>
-                <br/><br/>
-
-                <div id="msg-tracer-settings" class="hidden">
-                    <section>
-                        <h4>Console</h4>
-                        <div style="display: flex;flex-direction: row">
-                            <label for="msg-tracer-output-console">Output to console</label>
-                            <input id="msg-tracer-output-console" type="checkbox" />
-                        </div>
-                    </section>
-
-                    <h4>Logstash UDP</h4>
-                    <div style="display: flex;flex-direction: row">
-                        <label for="msg-tracer-logging-enable">Enable</label>
-                        <input id="msg-tracer-logging-enable" type="checkbox" />
-                    </div>
-
-
-                    <input id="msg-tracer-logging-host" type="text" placeholder="host" /><br/>
-                    <input id="msg-tracer-logging-port" type="text" placeholder="port" /><br/>
-
-                    <button id="msg-tracer-settings-save-btn">Save</button>
-                    <button id="msg-tracer-settings-abort-btn">Abort</button>
-
-                </div><br/>
-
-                <button id="node-route-prev-btn" style="width:20pt; text-align: center;">
-                    <i class="fa fa-arrow-left"></i>
-                </button>
-                <button id="node-route-next-btn" style="width:20pt; text-align: center;">
-                    <i class="fa fa-arrow-right"></i>
-                </button>
-
-                <br/><br/>
-
-                <pre id="node-contrib-route-log"></pre>
-              </div>
-
-
-
             </div>
 
             <style>
-                #msg-tracer-settings.hidden {
-                    display: none;
-                }
+       
             </style>
 `;
 

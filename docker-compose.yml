@@ -7,5 +7,12 @@ services:
       - "1880:1880"
     volumes:
       - ../:/data
+  node-red-2:
+    image: nodered/node-red:latest
+    ports:
+      - "1881:1880"
+    volumes:
+      - ../nr2:/data
+      - ../node-red-contrib-oztracer/:/data/node_modules/node-red-contrib-oztracer/
 networks:
   node-red-net:
