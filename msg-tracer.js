@@ -61,32 +61,59 @@ module.exports = function (RED) {
         return provider.getTracer('oztracer');
     }
 
-    function createSpan() {
-        let activeContext = context.active();
-        let parentSpan = tracer.startSpan(flowName, {
-            attributes: {}
-        }, activeContext);
-    }
-    function extractSpanFromMessage() {
+    /**
+     * 
+     * @param {
+     *    traceparent:string, 
+     *    tracestate:string 
+     * } propagationHeaders 
+     * 
+     * @returns Span
+     */
+    function extractSpanFromMessage(propagationHeaders) {
         activeContext = propagation.extract(context.active(), propagationHeaders);
         const spanContext = trace.getSpanContext(activeContext);
         trace.setSpan(activeContext, spanContext);
-
+        return activeContext;
     }
-    function setSpanOnMessage() {
+
+    function setSpanOnMessage(msg, ctx) {
         const output = {};
-        propagation.inject(messagesToTrace[msgId].ctx, output);
-        sentEvent.msg.headers.traceparent = output.traceparent;
-        sentEvent.msg.headers.tracestate = output.tracestate;
+        propagation.inject(ctx, output);
+        if (!msg.headers) {
+            msg.headers = {}
+        }
+        msg.headers.traceparent = output.traceparent;
+        msg.headers.tracestate = output.tracestate;
     }
-
-
     const messageSpans = {}
 
-
     RED.hooks.add("postDeliver", (sendEvents) => {
-        let msg = sendEvents.msg;
+        const msg = sendEvents.msg;
+        let msgId = msg._msgid;
+        //const destination = sendEvents.destination.node;
+        const source = sendEvents.source.node;
+        const tracer = tracers[source.z];
         msg.oznsource = sendEvents.source.node.id;
+
+        if (sendEvents.source.node.type === 'http in') {
+            let propagationHeaders = {
+                traceparent: msg.req.headers.traceparent,
+                tracestate: msg.req.headers.tracestate
+            }
+            let ctx = extractSpanFromMessage(propagationHeaders)
+            if (!messageSpans[msgId]) { //Primeira span
+                let mainSpan = tracer.startSpan(source.name, { attributes: {} }, ctx);
+                messageSpans[msgId] = {
+                    main: mainSpan,
+                    spans: {}
+                }
+            }
+            const span = tracer.startSpan(source.name, { attributes: {} }, ctx);
+            messageSpans[msgId].spans[source.id] = {
+                span: span
+            }
+        }
     });
 
     RED.hooks.add("onReceive", (sendEvents) => {
@@ -112,10 +139,11 @@ module.exports = function (RED) {
         let parent = messageSpans[msgId].spans[msg.oznsource] ? messageSpans[msgId].spans[msg.oznsource].span : messageSpans[msgId].main;
         const ctx = trace.setSpan(context.active(), parent);
         const span = tracer.startSpan(destination.name, { attributes: {} }, ctx);
-
         messageSpans[msgId].spans[destination.id] = {
             span: span
-
+        }
+        if (destination.type === "http request") {
+            setSpanOnMessage(msg, ctx);
         }
     });
 
