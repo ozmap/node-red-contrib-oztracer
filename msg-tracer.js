@@ -4,13 +4,8 @@ const { SemanticResourceAttributes } = require('@opentelemetry/semantic-conventi
 const { BasicTracerProvider, AlwaysOnSampler, BatchSpanProcessor } = require('@opentelemetry/sdk-trace-base');
 const { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-http');
 const path = require('path');
-const bodyParser = require('body-parser');
 const fs = require('fs');
 const fse = require('fs-extra');
-const jsondiffpatch = require('jsondiffpatch');
-const _ = require('lodash');
-const cycle = require('./cycle.js');
-
 
 const tracers = {};
 
@@ -28,7 +23,6 @@ module.exports = function (RED) {
         await fse.ensureDir(msgTracerConfigFolderPath);
         fs.writeFile(msgTracerConfigPath, JSON.stringify(flowManagerConfig), 'utf8', function () { });
     };
-
 
     RED.events.on('flows:started', function () {
         RED.nodes.eachNode(function (node) {
@@ -97,7 +91,6 @@ module.exports = function (RED) {
         msg.oznsource = source.id;
 
         if (source.type == 'http request') { //Ocoree "nesse nodered" quando a mensagem volta
-            try {
                 let parent = messageSpans[msgId].spans[msg.oznsource].span;
                 const ctx = trace.setSpan(context.active(), parent);
                 let data = {
@@ -113,9 +106,6 @@ module.exports = function (RED) {
                     }
                 }, ctx);
                 span.end();
-            } catch (e) {
-                console.log(e);
-            }
         }
 
         if (source.type === 'http in') { //ocorre no "outro nodered", quando a mensagem chega
@@ -129,25 +119,6 @@ module.exports = function (RED) {
                 main: mainSpan,
                 spans: {}
             }
-
-            /**
-            let request = {
-                payload: msg.payload,
-                headers: msg.req.headers,
-                query: msg.req.query,
-                params: msg.req.params
-            }
-            ctx = trace.setSpan(context.active(), mainSpan);
-            const span = tracer.startSpan(source.name, {
-                attributes: {
-                    request: JSON.stringify(request)
-                }
-            }, ctx);
-            messageSpans[msgId].spans[source.id] = {
-                span: span
-            }
-             */
-
         }
     });
 
@@ -199,15 +170,14 @@ module.exports = function (RED) {
         span.closed = true;
 
         let allClosed = false;
-        for(let r in messageSpans[msgId].spans ){
-            if(allClosed){
+        for (let r in messageSpans[msgId].spans) {
+            if (allClosed) {
                 return;
             }
             let theSpan = messageSpans[msgId].spans[r];
-            allClosed =  theSpan.closed;
-            console.log(theSpan.closed, theSpan.span.name);
+            allClosed = theSpan.closed;
         }
-        if(allClosed){
+        if (allClosed) {
             messageSpans[msgId].main.end();
         }
     })
