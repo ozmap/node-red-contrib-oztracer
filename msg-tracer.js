@@ -171,8 +171,7 @@ module.exports = function (RED) {
         } else {
             parent = messageSpans[msgId].main;
         }
-
-
+        
         const ctx = trace.setSpan(context.active(), parent);
         const span = tracer.startSpan(destination.name, { attributes: {} }, ctx);
         messageSpans[msgId].spans[destination.id] = {
