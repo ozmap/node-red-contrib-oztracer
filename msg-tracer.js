@@ -38,17 +38,20 @@ module.exports = function (RED) {
         let traceId = span.spanContext().traceId;
         let spanId = span.spanContext().spanId;
         let spanFlags = span.spanContext().traceFlags;
-        if (msg.logToLokiLevel) {
-            console.log({
-                level: msg.logToLokiLevel,
-                nodered: NODE_RED_NAME,
-                nodeId: node.id,
-                nodeName: node.name,
-                traceId,
-                spanId,
-                spanFlags,
-                payload: msg.payload
-            });
+        let toLog = {
+            nodered: NODE_RED_NAME,
+            nodeId: node.id,
+            nodeName: node.name,
+            traceId,
+            spanId,
+            spanFlags,
+            payload: msg.payload
+        }
+        if (msg.logToAttribute) {
+            span.setAttribute('log', JSON.stringify(toLog))
+        }
+        if (msg.logToConsole) {
+            console.log(to);
         }
     }
 
