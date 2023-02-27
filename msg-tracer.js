@@ -86,33 +86,68 @@ module.exports = function (RED) {
         msg.headers.traceparent = output.traceparent;
         msg.headers.tracestate = output.tracestate;
     }
-    const messageSpans = {}
 
-    RED.hooks.add("postDeliver", (sendEvents) => {
+    const messageSpans = {};
+
+    RED.hooks.add("preRoute", (sendEvents) => {
         const msg = sendEvents.msg;
         let msgId = msg._msgid;
-        //const destination = sendEvents.destination.node;
         const source = sendEvents.source.node;
         const tracer = tracers[source.z];
-        msg.oznsource = sendEvents.source.node.id;
+        msg.oznsource = source.id;
 
-        if (sendEvents.source.node.type === 'http in') {
+        if (source.type == 'http request') { //Ocoree "nesse nodered" quando a mensagem volta
+            try {
+                let parent = messageSpans[msgId].spans[msg.oznsource].span;
+                const ctx = trace.setSpan(context.active(), parent);
+                let data = {
+                    payload: msg.payload,
+                    headers: msg.headers,
+                    url: msg.responseUrl,
+                    statusCode: msg.statusCode
+                }
+                //Span só pra marcar os dados de entrada
+                const span = tracer.startSpan("response", {
+                    attributes: {
+                        response: JSON.stringify(data)
+                    }
+                }, ctx);
+                span.end();
+            } catch (e) {
+                console.log(e);
+            }
+        }
+
+        if (source.type === 'http in') { //ocorre no "outro nodered", quando a mensagem chega
             let propagationHeaders = {
                 traceparent: msg.req.headers.traceparent,
                 tracestate: msg.req.headers.tracestate
             }
             let ctx = extractSpanFromMessage(propagationHeaders)
-            if (!messageSpans[msgId]) { //Primeira span
-                let mainSpan = tracer.startSpan(source.name, { attributes: {} }, ctx);
-                messageSpans[msgId] = {
-                    main: mainSpan,
-                    spans: {}
-                }
+            let mainSpan = tracer.startSpan(source.name, { attributes: {} }, ctx);
+            messageSpans[msgId] = {
+                main: mainSpan,
+                spans: {}
             }
-            const span = tracer.startSpan(source.name, { attributes: {} }, ctx);
+
+            /**
+            let request = {
+                payload: msg.payload,
+                headers: msg.req.headers,
+                query: msg.req.query,
+                params: msg.req.params
+            }
+            ctx = trace.setSpan(context.active(), mainSpan);
+            const span = tracer.startSpan(source.name, {
+                attributes: {
+                    request: JSON.stringify(request)
+                }
+            }, ctx);
             messageSpans[msgId].spans[source.id] = {
                 span: span
             }
+             */
+
         }
     });
 
@@ -136,13 +171,21 @@ module.exports = function (RED) {
             }
         }
 
-        let parent = messageSpans[msgId].spans[msg.oznsource] ? messageSpans[msgId].spans[msg.oznsource].span : messageSpans[msgId].main;
+        let parent = null;
+        if (messageSpans[msgId].spans[msg.oznsource]) {
+            parent = messageSpans[msgId].spans[msg.oznsource].span
+        } else {
+            parent = messageSpans[msgId].main;
+        }
+
+
         const ctx = trace.setSpan(context.active(), parent);
         const span = tracer.startSpan(destination.name, { attributes: {} }, ctx);
         messageSpans[msgId].spans[destination.id] = {
             span: span
         }
-        if (destination.type === "http request") {
+
+        if (destination.type === "http request") { //Adiciona a mensagem no contexto
             setSpanOnMessage(msg, ctx);
         }
     });
@@ -154,5 +197,18 @@ module.exports = function (RED) {
         const span = messageSpans[msgId].spans[destination.id]
         span.span.end();
         span.closed = true;
+
+        let allClosed = false;
+        for(let r in messageSpans[msgId].spans ){
+            if(allClosed){
+                return;
+            }
+            let theSpan = messageSpans[msgId].spans[r];
+            allClosed =  theSpan.closed;
+            console.log(theSpan.closed, theSpan.span.name);
+        }
+        if(allClosed){
+            messageSpans[msgId].main.end();
+        }
     })
 };
