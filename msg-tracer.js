@@ -114,17 +114,10 @@ module.exports = function (RED) {
         if (source.type == 'http request') { //Ocoree "nesse nodered" quando a mensagem volta
             let parent = messageSpans[msgId].spans[msg.oznsource].span;
             const ctx = trace.setSpan(context.active(), parent);
-            let data = {
-                payload: msg.payload,
-                headers: msg.headers,
-                url: msg.responseUrl,
-                statusCode: msg.statusCode
-            }
+            
             //Span só pra marcar os dados de entrada
             const span = tracer.startSpan("response", {
-                attributes: {
-                    response: JSON.stringify(data)
-                }
+                attributes: { }
             }, ctx);
             toLokiLog(msg, span, source);
             span.end();
@@ -171,7 +164,7 @@ module.exports = function (RED) {
         } else {
             parent = messageSpans[msgId].main;
         }
-        
+
         const ctx = trace.setSpan(context.active(), parent);
         const span = tracer.startSpan(destination.name, { attributes: {} }, ctx);
         messageSpans[msgId].spans[destination.id] = {
