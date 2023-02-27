@@ -68,7 +68,7 @@ module.exports = function (RED) {
             sampler: new AlwaysOnSampler(),
             resource: new Resource({
                 [SemanticResourceAttributes.SERVICE_NAME]: NODE_RED_NAME+"-"+name,
-                [SemanticResourceAttributes.CONTAINER_NAME]: CONTAINER_NAME
+                [SemanticResourceAttributes.CONTAINER_NAME]: NODE_RED_NAME
             }),
         });
         provider.addSpanProcessor(spanProcessor);
