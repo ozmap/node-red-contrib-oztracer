@@ -7,6 +7,8 @@ const path = require('path');
 const fs = require('fs');
 const fse = require('fs-extra');
 
+const NODE_RED_NAME = process.env.NODE_RED_NAME || "NodeRedUnknow";
+
 const tracers = {};
 
 const collectorOptions = {
@@ -32,6 +34,24 @@ module.exports = function (RED) {
         });
     });
 
+    function toLokiLog(msg, span, node) {
+        let traceId = span.spanContext().traceId;
+        let spanId = span.spanContext().spanId;
+        let spanFlags = span.spanContext().traceFlags;
+        if (msg.logToLokiLevel) {
+            console.log({
+                level: msg.logToLokiLevel,
+                nodered: NODE_RED_NAME,
+                nodeId: node.id,
+                nodeName: node.name,
+                traceId,
+                spanId,
+                spanFlags,
+                payload: msg.payload
+            });
+        }
+    }
+
     function createTracer(node) {
         let name = node.name || node.label;
         const provider = new BasicTracerProvider({
@@ -47,7 +67,8 @@ module.exports = function (RED) {
             },
             sampler: new AlwaysOnSampler(),
             resource: new Resource({
-                [SemanticResourceAttributes.SERVICE_NAME]: name,
+                [SemanticResourceAttributes.SERVICE_NAME]: NODE_RED_NAME+"-"+name,
+                [SemanticResourceAttributes.CONTAINER_NAME]: CONTAINER_NAME
             }),
         });
         provider.addSpanProcessor(spanProcessor);
@@ -91,21 +112,22 @@ module.exports = function (RED) {
         msg.oznsource = source.id;
 
         if (source.type == 'http request') { //Ocoree "nesse nodered" quando a mensagem volta
-                let parent = messageSpans[msgId].spans[msg.oznsource].span;
-                const ctx = trace.setSpan(context.active(), parent);
-                let data = {
-                    payload: msg.payload,
-                    headers: msg.headers,
-                    url: msg.responseUrl,
-                    statusCode: msg.statusCode
+            let parent = messageSpans[msgId].spans[msg.oznsource].span;
+            const ctx = trace.setSpan(context.active(), parent);
+            let data = {
+                payload: msg.payload,
+                headers: msg.headers,
+                url: msg.responseUrl,
+                statusCode: msg.statusCode
+            }
+            //Span só pra marcar os dados de entrada
+            const span = tracer.startSpan("response", {
+                attributes: {
+                    response: JSON.stringify(data)
                 }
-                //Span só pra marcar os dados de entrada
-                const span = tracer.startSpan("response", {
-                    attributes: {
-                        response: JSON.stringify(data)
-                    }
-                }, ctx);
-                span.end();
+            }, ctx);
+            toLokiLog(msg, span, source);
+            span.end();
         }
 
         if (source.type === 'http in') { //ocorre no "outro nodered", quando a mensagem chega
@@ -115,6 +137,7 @@ module.exports = function (RED) {
             }
             let ctx = extractSpanFromMessage(propagationHeaders)
             let mainSpan = tracer.startSpan(source.name, { attributes: {} }, ctx);
+            toLokiLog(msg, mainSpan, source);
             messageSpans[msgId] = {
                 main: mainSpan,
                 spans: {}
@@ -155,6 +178,8 @@ module.exports = function (RED) {
         messageSpans[msgId].spans[destination.id] = {
             span: span
         }
+
+        toLokiLog(msg, span, destination);
 
         if (destination.type === "http request") { //Adiciona a mensagem no contexto
             setSpanOnMessage(msg, ctx);
