@@ -19,6 +19,7 @@
     "decache": "^4.5.1",
     "express": "^4.16.4",
     "fs-extra": "^7.0.1",
+    "graphlib": "^2.1.8",
     "jsondiffpatch": "^0.3.11",
     "lodash": "^4.17.11",
     "log4js": "~3.0.6",
