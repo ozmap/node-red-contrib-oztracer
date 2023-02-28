@@ -1,6 +1,7 @@
 {
-  "name": "node-red-contrib-oztracer",
+  "name": "@ozmap/node-red-contrib-oztracer",
   "version": "0.0.1",
+  "description": "Basic implementations of opentelemetry as tracer inside nodered",
   "node-red": {
     "nodes": {
       "msg-tracer": "msg-tracer.js"
@@ -19,12 +20,7 @@
     "decache": "^4.5.1",
     "express": "^4.16.4",
     "fs-extra": "^7.0.1",
-    "graphlib": "^2.1.8",
-    "jsondiffpatch": "^0.3.11",
-    "lodash": "^4.17.11",
-    "log4js": "~3.0.6",
-    "safe-json-stringify": "^1.2.0",
-    "serve-static": "*"
+    "safe-json-stringify": "^1.2.0"
   },
   "repository": {
     "type": "git",
