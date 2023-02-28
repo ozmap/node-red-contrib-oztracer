@@ -29,7 +29,7 @@ module.exports = function (RED) {
         fse.ensureDirSync(msgTracerConfigFolderPath);
         if(!config){
             config = {};
-            config.url="http://grafana-agent:4318/v1/traces",
+            config.urlEndPoint="http://grafana-agent:4318/v1/traces",
             config.serviceName="NodeRedUnknow"
         }
         fse.writeJSONSync(msgTracerConfigFile, config)
@@ -77,7 +77,7 @@ module.exports = function (RED) {
 
     function createTracer(node) {
         const collectorOptions = {
-            url: config.url
+            url: config.urlEndPoint
         };
         const oTLPTraceExporter = new OTLPTraceExporter(collectorOptions);
         const spanProcessor = new BatchSpanProcessor(oTLPTraceExporter);
