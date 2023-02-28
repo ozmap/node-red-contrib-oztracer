@@ -5,6 +5,8 @@ This node-red module add opentelemetry to Node-RED
 All messages will be tracced into trace system,
 
 if you like to have logs, you can add:
+
+
     **msg.logToAttribute**
         This option will add logs directly into the atributes of the span
 
