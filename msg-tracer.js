@@ -7,6 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const fse = require('fs-extra');
 const bodyParser = require('body-parser');
+const safeStringify = require('fast-safe-stringify')
 
 const NODE_RED_NAME = process.env.NODE_RED_NAME || "NodeRedUnknow";
 
@@ -47,20 +48,28 @@ module.exports = function (RED) {
         let traceId = span.spanContext().traceId;
         let spanId = span.spanContext().spanId;
         let spanFlags = span.spanContext().traceFlags;
-        let toLog = {
+        let payloadSafe = "Fail to serialize object: "
+        
+        try{
+            payloadSafe = safeStringify(msg.payload)
+        }catch(e){
+            payloadSafe += e.message
+        }
+        let toLog = safeStringify({
             nodered: NODE_RED_NAME,
             nodeId: node.id,
             nodeName: node.name,
             traceId,
             spanId,
             spanFlags,
-            payload: msg.payload
-        }
+            payload: payloadSafe
+        })
+
         if (msg.logToAttribute) {
-            span.setAttribute('log', JSON.stringify(toLog))
+            span.setAttribute('log', toLog)
         }
         if (msg.logToConsole) {
-            console.log(to);
+            console.log(toLog);
         }
     }
 
