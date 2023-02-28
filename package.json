@@ -24,7 +24,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/raupp/node-red-contrib-oztracer.git"
+    "url": "git+https://github.com/ozmap/ozmap-node-red-contrib-oztracer.git"
   },
   "keywords": [
     "node-red",
