@@ -11,19 +11,24 @@ const NODE_RED_NAME = process.env.NODE_RED_NAME || "NodeRedUnknow";
 
 const tracers = {};
 
-const collectorOptions = {
-    url: 'http://mhnet.ozmap.com.br:4318/v1/traces'
-};
-const oTLPTraceExporter = new OTLPTraceExporter(collectorOptions);
-const spanProcessor = new BatchSpanProcessor(oTLPTraceExporter);
-
 module.exports = function (RED) {
-    const msgTracerConfigFolderPath = path.resolve(RED.settings.userDir, 'msg-tracer-config');
-    const msgTracerConfigPath = path.join(msgTracerConfigFolderPath, 'local.json');
-    const flowManagerConfig = JSON.parse(JSON.stringify(require('config')));
-    const persistFlowManagerConfigFile = async function () {
-        await fse.ensureDir(msgTracerConfigFolderPath);
-        fs.writeFile(msgTracerConfigPath, JSON.stringify(flowManagerConfig), 'utf8', function () { });
+    const msgTracerConfigFolderPath = path.resolve(RED.settings.userDir, 'oztracer');
+    const msgTracerConfigFile = path.join(msgTracerConfigFolderPath, 'config.json');
+    let config = null;
+    if(fse.existsSync(msgTracerConfigFile)){
+        config = fse.readJSONSync(msgTracerConfigFile);
+    }else{
+        saveConfig(); // Se não existe, cria o primeiro config
+    }
+    function saveConfig() {
+        console.log("Salvado config em:"+msgTracerConfigFile)
+        fse.ensureDirSync(msgTracerConfigFolderPath);
+        if(!config){
+            config = {};
+            config.url="http://grafana-agent:4318/v1/traces",
+            config.serviceName="NodeRedUnknow"
+        }
+        fse.writeJSONSync(msgTracerConfigFile, config)
     };
 
     RED.events.on('flows:started', function () {
@@ -56,6 +61,11 @@ module.exports = function (RED) {
     }
 
     function createTracer(node) {
+        const collectorOptions = {
+            url: config.url
+        };
+        const oTLPTraceExporter = new OTLPTraceExporter(collectorOptions);
+        const spanProcessor = new BatchSpanProcessor(oTLPTraceExporter);
         let name = node.name || node.label;
         const provider = new BasicTracerProvider({
             generalLimits: {
@@ -70,8 +80,8 @@ module.exports = function (RED) {
             },
             sampler: new AlwaysOnSampler(),
             resource: new Resource({
-                [SemanticResourceAttributes.SERVICE_NAME]: NODE_RED_NAME+"-"+name,
-                [SemanticResourceAttributes.CONTAINER_NAME]: NODE_RED_NAME
+                [SemanticResourceAttributes.SERVICE_NAME]: config.serviceName+"-"+name,
+                [SemanticResourceAttributes.CONTAINER_NAME]: config.serviceName
             }),
         });
         provider.addSpanProcessor(spanProcessor);

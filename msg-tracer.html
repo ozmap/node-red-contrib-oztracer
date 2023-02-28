@@ -27,27 +27,14 @@
 
         let content = `
             <div id="tracer-tabs">
-              <ul>
-                <li><a href="#tracer-tabs-config">Config</a></li>
-              </ul>
-
-              <div id="tracer-tabs-config">
-                <br style="margin-top: 5pt"/>
-
-                <button class="toggle-bp-button" id="toggleBp"><i class="fa fa-stop-circle-o"></i></button>
+                <h4>Configurações do sistema:</h4>
                 <div>
-                    <h4>Breakpoints:</h4>
-                    <ul id="tracer-breakpoints-list"></ul>
+                    <br/>
+                    EndPoint:<input id="url-end-point"><br/>
+                    ServiceName:<input id="service-name"><br/><br/>
+                    <button id="save-button">Salvar</button>
                 </div>
-
-                <div>
-                    <h4>Paused msg(s):</h4>
-                    <ul id="tracer-msg-list"></ul>
-                    <button id="tracer-release-all-button">Release All</button>
-                    <button id="tracer-step-all-button">Step All</button>
-                    <button id="tracer-kill-all-button">Kill All</button>
-                </div>
-              </div>
+              
 
             </div>
 
@@ -56,18 +43,13 @@
             </style>
 `;
 
-        let script = $(`<script>`, {html: `
-            $( function() {
-                $( "#tracer-tabs" ).tabs();
-            } );
-        `});
-        content = $(content).append(script);
+        content = $(content);
 
         // Adding the tracer tab to the sidebar
         RED.sidebar.addTab({
             id: "msg-tracer",
-            label: 'MSG Tracer',
-            name: 'MSG Tracer',
+            label: 'OZTracer',
+            name: 'OZTracer',
             iconClass: "fa fa-random",
             content: content,
             pinned: true,
@@ -137,303 +119,18 @@
         let CaughtMessages = {};
         let config = {};
 
-        toggleBpButton.on('click', function() {
-            const selection = RED.view.selection();
-            for(let node of selection.nodes) {
-                if(!DebugSettings[node.id]) {
-                    DebugSettings[node.id] = {break:false};
-                }
 
-                const settings = DebugSettings[node.id];
-
-                settings.break = !settings.break;
-            }
-
-            $.ajax({
-                url: 'msg-tracer/debug',
-                contentType: "application/json",
-                dataType:'json',
-                data: JSON.stringify(DebugSettings),
-                type: 'PUT',
-                error: function() {
-                    alert(`Failed to change debug state`);
-                },
-                success: function() {}
-            });
-
-        });
-
-        function updateCoughtMessages(caughtMessages) {
-            msgList.html('');
-
-            // clear svg breakpoint caught markers
-            $('.tracer-caught').remove();
-
-            for(let catchId of Object.keys(caughtMessages)) {
-                const catchInfo = caughtMessages[catchId];
-
-                // Add to list HTML
-                const item = $(`<li></li>`);
-                const $msgButton = $(`<a style="cursor: pointer;">${catchInfo.nodeId}</a>`);
-                $msgButton.click(function () {
-                    RED.view.reveal(catchInfo.nodeId);
-                    RED.view.select(catchInfo.nodeId);
-                });
-                const editButton = $(`<span><a style="cursor: pointer;color: green;"><i class="fa fa-edit"></i></a> </span>`);
-                editButton.click(function () {
-
-                    $.ajax({
-                        url: 'msg-tracer/caught/'+catchId+'/msg',
-                        contentType: "application/json",
-                        type: 'GET',
-                        error: function(e) {
-                            alert(`Failed to get msg: ${e}`);
-                        },
-                        success: function(msg) {
-                            RED.editor.editJSON({
-                                title:`Edit msg in ${catchInfo.nodeId}`,
-                                value:msg?JSON.stringify(msg, null, 2):'{}',
-                                complete: function(newJsonString) {
-                                    try {
-                                        const newJson = JSON.parse(newJsonString);
-                                        const delta = jsondiffpatch.diff(msg, newJson);
-                                        if(delta) {
-                                            $.ajax({
-                                                url: 'msg-tracer/caught/patch/'+catchId,
-                                                contentType: "application/json",
-                                                dataType:'json',
-                                                type: 'PUT',
-                                                data: JSON.stringify(delta),
-                                                error: function(e) {
-                                                    alert(`Failed to patch msg: ${e}`);
-                                                },
-                                                success: function() {}
-                                            });
-                                        }
-                                    } catch (e) {
-                                        alert('Patch parsing/diff failed locally');
-                                    }
-                                }
-                            });
-                        }
-                    });
-                });
-                const releaseButton = $(` <button>release</button>`);
-                releaseButton.click(function () {
-                    $.ajax({
-                        url: 'msg-tracer/caught/continue/'+catchId,
-                        contentType: "application/json",
-                        dataType:'json',
-                        type: 'PUT',
-                        error: function() {
-                            alert(`Failed to continue msg execution`);
-                        },
-                        success: function() {}
-                    });
-                });
-                const stepButton = $(` <button>step</button>`);
-                stepButton.click(function () {
-                    $.ajax({
-                        url: 'msg-tracer/caught/step/'+catchId,
-                        contentType: "application/json",
-                        dataType:'json',
-                        type: 'PUT',
-                        error: function() {
-                            alert(`Failed to step msg execution`);
-                        },
-                        success: function() {}
-                    });
-                });
-                const killButton = $(` <button>kill</button>`);
-                killButton.click(function () {
-                    $.ajax({
-                        url: 'msg-tracer/caught/kill/'+catchId,
-                        contentType: "application/json",
-                        dataType:'json',
-                        type: 'PUT',
-                        error: function() {
-                            alert(`Failed to kill msg execution`);
-                        },
-                        success: function() {}
-                    });
-                });
-                editButton.appendTo(item);
-                $msgButton.appendTo(item);
-                releaseButton.appendTo(item);
-                stepButton.appendTo(item);
-                killButton.appendTo(item);
-                item.appendTo(msgList);
-
-
-                // SVG related
-                const selectorForNodeOnSvg = `g#${catchInfo.nodeId.replace('.','\\.')}`;
-                const selectorForMarkerForNode = `${selectorForNodeOnSvg} .tracer-caught`;
-                const markerExistsAlready = $(selectorForMarkerForNode).length>0;
-
-                if(!markerExistsAlready) {
-                    // Adding to SVG
-                    // Count how many msg(s) await this node
-                    let curNodeId = catchInfo.nodeId;
-                    let count = 0;
-                    for(let catchId of Object.keys(caughtMessages)) {
-                        const catchInfo = caughtMessages[catchId];
-                        if(catchInfo.nodeId === curNodeId) count++;
-                    }
-
-                    const text = $(document.createElementNS('http://www.w3.org/2000/svg', 'text'))
-                        .attr({
-                            class: 'tracer-caught',
-                            x:20,
-                            y:-6.5,
-                            fill:'blue',
-                            stroke:'none',
-                            "font-size": '13pt'
-                        })
-                        .html(`${count}`);
-
-                    const nodeElement = $(selectorForNodeOnSvg);
-                    text.appendTo(nodeElement);
-                }
-
-            }
-
-            CaughtMessages = caughtMessages;
-        }
-
-        releaseAllButton.click(function () {
-            $.ajax({
-                url: 'msg-tracer/caught/continue',
-                contentType: "application/json",
-                dataType:'json',
-                type: 'POST',
-                error: function() {
-                    alert(`Failed to continue all msg execution`);
-                },
-                success: function() {}
-            });
-        });
-
-        stepAllButton.click(function () {
-            $.ajax({
-                url: 'msg-tracer/caught/step',
-                contentType: "application/json",
-                dataType:'json',
-                type: 'POST',
-                error: function() {
-                    alert(`Failed to step all msg execution`);
-                },
-                success: function() {}
-            });
-        });
-
-        killAllButton.click(function () {
-            $.ajax({
-                url: 'msg-tracer/caught/kill',
-                contentType: "application/json",
-                dataType:'json',
-                type: 'POST',
-                error: function() {
-                    alert(`Failed to kill all msg execution`);
-                },
-                success: function() {}
-            });
-        });
-
-        function updateDebugSettings(debugSettings) {
-            // Clean markers and tracer ui section
-            bpList.html('');
-            const allBreakPointMarkers = $(`g .tracer-breakpoint`);
-            allBreakPointMarkers.remove();
-
-            for(let settingsKey of Object.keys(debugSettings)) {
-                const settings = debugSettings[settingsKey];
-                if(!settings.break) {
-                    const breakPointMarker = $(`g#${settingsKey.replace('.','\\.')} .tracer-breakpoint`);
-                    breakPointMarker.remove();
-                } else {
-                    const markerEl = $(document.createElementNS('http://www.w3.org/2000/svg', 'circle'))
-                        .attr({
-                            class: 'tracer-breakpoint',
-                            fill: 'red',
-                            cx: 8,
-                            cy: -11,
-                            r: 7.5
-                        });
-
-                    const nodeElement = $(`g#${settingsKey.replace('.','\\.')}`);
-                    markerEl.appendTo(nodeElement);
-
-                    const item = $(`<li style="cursor: pointer;"><a>${settingsKey}</a></li>`);
-                    item.click(function () {
-                        RED.view.reveal(settingsKey);
-                        RED.view.select(settingsKey);
-                    });
-                    item.appendTo(bpList);
-                }
-            }
-            DebugSettings = debugSettings;
-        }
-
-        RED.comms.subscribe("msg-tracer/debug",function(topic, debugSettings) {
-            updateDebugSettings(debugSettings);
+        RED.comms.subscribe("oztracer-config",function(topic, oztracerConfig) {
+            console.log(topic, oztracerConfig)
         });
 
         RED.comms.subscribe("msg-tracer/caught",function(topic, caughtMessages) {
             updateCoughtMessages(caughtMessages);
         });
 
-        RED.events.on('workspace:change', async function(e){
-            for(let i=0;i<10;i++) {
-                const nodesFoundInCurrentFlow = $('g.node.nodegroup').length > 0;
-                if(nodesFoundInCurrentFlow) break;
 
-                await(new Promise(res=>{setTimeout(res,500)}));
-            }
-            updateCoughtMessages(CaughtMessages);
-            updateDebugSettings(DebugSettings);
-        });
 
-        RED.comms.subscribe("msg-tracer/log",function(topic, obj) {
-
-            try {
-                entries.push(obj);
-
-                const dateObj = new Date(obj.time);
-                const strForLog =
-                    ('' + dateObj.getHours()).padStart(2,'0') + ':' +
-                    ('' + dateObj.getMinutes()).padStart(2,'0') + '.' +
-                    ('' + dateObj.getMilliseconds()).padStart(3,'0');
-
-                const nodeObjectForLog = obj.node;
-                const stepText = nodeObjectForLog.type + '@ ' + (nodeObjectForLog.name||nodeObjectForLog.label||'(NameLess)');
-
-                const lineEl = document.createElement('span');
-                lineEl.className = 'msg-tracer-line';
-                lineEl.setAttribute('id','msg-tracer-line-'+(entries.length-1));
-                $(lineEl).on('click', function () {
-                    RED.editor.editJSON({title:`${nodeObjectForLog.id} ${stepText}`, value:obj.msg?JSON.stringify(obj.msg, null, 2):'{}'});
-                });
-                lineEl.style.cursor = 'zoom-in';
-
-                lineEl.innerText = `${strForLog}: ${stepText}`;
-
-                const linkToNodeEl = document.createElement('a');
-                linkToNodeEl.innerText = ` #${nodeObjectForLog.id}`;
-                linkToNodeEl.style.cursor = 'pointer';
-                linkToNodeEl.style.color = 'blue';
-                linkToNodeEl.onclick = function() {
-                    const idx = parseInt(lineEl.getAttribute('id').split('msg-tracer-line-')[1]);
-                    selectByIndex(idx);
-                };
-
-                const logElRowContainer = document.createElement('span');
-                logElRowContainer.appendChild(lineEl);
-                logElRowContainer.appendChild(linkToNodeEl);
-                logElRowContainer.appendChild(document.createElement('br'));
-
-                logEl.append(logElRowContainer);
-            } catch(e) {}
-        });
+        
 
         settingsButton.on('click', function() {
             const isHidden = settingsContainer.hasClass('hidden');
