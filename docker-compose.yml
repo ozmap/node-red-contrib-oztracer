@@ -17,6 +17,6 @@ services:
       - "1881:1880"
     volumes:
       - ../nr2:/data
-      - ../node-red-contrib-oztracer/:/data/node_modules/node-red-contrib-oztracer/
+      - ../node-red-contrib-oztracer/:/data/node-red-contrib-oztracer
 networks:
   node-red-net:

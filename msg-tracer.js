@@ -30,7 +30,7 @@ module.exports = function (RED) {
         if(!config){
             config = {};
             config.urlEndPoint="http://grafana-agent:4318/v1/traces",
-            config.serviceName="NodeRedUnknow"
+            config.serviceName=NODE_RED_NAME
         }
         fse.writeJSONSync(msgTracerConfigFile, config)
     };

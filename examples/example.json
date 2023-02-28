@@ -1,0 +1,118 @@
+[
+    {
+        "id": "b73ebe68fad56aca",
+        "type": "tab",
+        "label": "Flow 1",
+        "disabled": false,
+        "info": "",
+        "env": []
+    },
+    {
+        "id": "3b19666e3d160a37",
+        "type": "inject",
+        "z": "b73ebe68fad56aca",
+        "name": "start",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            },
+            {
+                "p": "logToAttribute",
+                "v": "true",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 150,
+        "y": 120,
+        "wires": [
+            [
+                "5ba4ef94951aff12"
+            ]
+        ]
+    },
+    {
+        "id": "5ba4ef94951aff12",
+        "type": "function",
+        "z": "b73ebe68fad56aca",
+        "name": "a",
+        "func": "\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 350,
+        "y": 120,
+        "wires": [
+            [
+                "4e1e2f5aa4d3881b"
+            ]
+        ]
+    },
+    {
+        "id": "4e1e2f5aa4d3881b",
+        "type": "function",
+        "z": "b73ebe68fad56aca",
+        "name": "b",
+        "func": "\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 530,
+        "y": 120,
+        "wires": [
+            [
+                "a0c4fa236e09c96a"
+            ]
+        ]
+    },
+    {
+        "id": "a0c4fa236e09c96a",
+        "type": "function",
+        "z": "b73ebe68fad56aca",
+        "name": "c",
+        "func": "\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 730,
+        "y": 120,
+        "wires": [
+            [
+                "187245b92c206529"
+            ]
+        ]
+    },
+    {
+        "id": "187245b92c206529",
+        "type": "debug",
+        "z": "b73ebe68fad56aca",
+        "name": "debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 930,
+        "y": 120,
+        "wires": []
+    }
+]
