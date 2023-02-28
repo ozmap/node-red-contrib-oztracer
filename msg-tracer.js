@@ -6,6 +6,7 @@ const { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-http')
 const path = require('path');
 const fs = require('fs');
 const fse = require('fs-extra');
+const bodyParser = require('body-parser');
 
 const NODE_RED_NAME = process.env.NODE_RED_NAME || "NodeRedUnknow";
 
@@ -20,6 +21,9 @@ module.exports = function (RED) {
     }else{
         saveConfig(); // Se não existe, cria o primeiro config
     }
+    
+    RED.comms.publish("oztracer/config", config, true); //inicial
+
     function saveConfig() {
         console.log("Salvado config em:"+msgTracerConfigFile)
         fse.ensureDirSync(msgTracerConfigFolderPath);
@@ -59,6 +63,17 @@ module.exports = function (RED) {
             console.log(to);
         }
     }
+
+    RED.httpAdmin.put('/oztracer/config', bodyParser.json(), function(req, res) {
+        if(req.body && req.body.constructor === {}.constructor) {
+            config =  req.body;
+            saveConfig()
+        } else {
+            res.status(202).send({error: 'Must send json object {...}'});
+        }
+    });
+
+
 
     function createTracer(node) {
         const collectorOptions = {

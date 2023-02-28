@@ -20,11 +20,6 @@
 
     $(()=>{
         const noderedAdminUrl = window.location.href.split('#')[0];
-        if(!window.jsondiffpatch) {
-            const $jsondiffpatch = $('<script>', {src: `${noderedAdminUrl}msg-tracer/jsondiffpatch.js`});
-            $jsondiffpatch.appendTo(document.head);
-        }
-
         let content = `
             <div id="tracer-tabs">
                 <h4>Configurações do sistema:</h4>
@@ -56,186 +51,36 @@
             enableOnEdit: true
         });
 
-        let entries = [];
-        let currentIndex;
-        const logEl = $('#node-contrib-route-log')
-            , toggleButton = $('#node-route-toggle-btn')
-            , clearButton = $('#node-route-clear-btn')
-            , nextButton = $('#node-route-next-btn')
-            , prevButton = $('#node-route-prev-btn')
-            , settingsButton = $('#node-route-settings-btn')
-            , settingsContainer = $('#msg-tracer-settings')
-            , settings = {
-                saveButton: $('#msg-tracer-settings-save-btn'),
-                abortButton: $('#msg-tracer-settings-abort-btn'),
-                enable: $('#msg-tracer-logging-enable'),
-                host: $('#msg-tracer-logging-host'),
-                port: $('#msg-tracer-logging-port'),
-                console: $('#msg-tracer-output-console')
-            }
-            , toggleBpButton = $('#toggleBp')
-            , bpList = $('#tracer-breakpoints-list')
-            , msgList = $('#tracer-msg-list')
-            , releaseAllButton = $('#tracer-release-all-button')
-            , stepAllButton = $('#tracer-step-all-button')
-            , killAllButton = $('#tracer-kill-all-button')
-        ;
-
-        let isOn = false;
-
-        function updateButtonState() {
-            toggleButton.text(isOn?'Stop':'Start');
-        }
-
-
-        function updateTracerLogSettingsViewState() {
-            settings.enable.prop('checked', !!config.enableLogging);
-            settings.console.prop('checked', !!config.console);
-            settings.host.val(config.host?config.host:'');
-            settings.port.val(config.port?(''+config.port):'');
-        }
-
-        function configReceived(cfg) {
-            config = cfg;
-            isOn = !!cfg.uiTrace;
-            updateButtonState();
-            updateTracerLogSettingsViewState();
-            return cfg;
-        }
-        RED.comms.subscribe("msg-tracer/config", function (topic, cfg) {
-            configReceived(cfg);
-        });
-
-        // Mark step as the selected step to view & focus on it
-        function selectByIndex(index) {
-            const $lineEl = $('#msg-tracer-line-'+index);
-            $('.msg-tracer-line-selected').removeClass('msg-tracer-line-selected');
-            $lineEl.addClass('msg-tracer-line-selected');
-            currentIndex = index;
-            RED.view.reveal(entries[index].node.id);
-        }
-
-        let DebugSettings = {};
-        let CaughtMessages = {};
         let config = {};
+        let serviceName = $("#service-name");
+        let urlEndPoint = $("#url-end-point");
+        let saveButton = $("#save-button");
 
-
-        RED.comms.subscribe("oztracer-config",function(topic, oztracerConfig) {
-            console.log(topic, oztracerConfig)
+        RED.comms.subscribe("oztracer/config", function (topic, cfg) {
+            serviceName.val(cfg.serviceName);
+            urlEndPoint.val(cfg.url);
         });
 
-        RED.comms.subscribe("msg-tracer/caught",function(topic, caughtMessages) {
-            updateCoughtMessages(caughtMessages);
-        });
-
-
-
-        
-
-        settingsButton.on('click', function() {
-            const isHidden = settingsContainer.hasClass('hidden');
-            if(!isHidden) {
-                settingsContainer.addClass('hidden');
-                return;
-            }
-            settingsContainer.removeClass('hidden');
-
-            updateTracerLogSettingsViewState();
-        });
-
-        clearButton.on('click', function() {
-            entries = [];
-            currentIndex = undefined;
-            logEl.text('');
-        });
-
-        // Settings allow logging via udp
-        settings.saveButton.on('click', function () {
-            const patchCfg = {
-                enableLogging: settings.enable.is(':checked'),
-                host: settings.host.val(),
-                port: parseInt(settings.port.val()) || 1,
-                console: settings.console.is(':checked') || false
+       
+        saveButton.on('click', function () {
+            const putConfig = {
+                serviceName: serviceName.val(),
+                urlEndPoint: urlEndPoint.val()
             };
 
             $.ajax({
-                url: 'msg-tracer/config',
+                url: 'oztracer/config',
                 contentType: "application/json",
                 dataType:'json',
-                data: JSON.stringify(patchCfg),
-                type: 'PATCH',
+                data: JSON.stringify(putConfig),
+                type: 'PUT',
                 error: function() {
-                    alert(`Failed to change trace state`);
+                    console.error(`Failed to change trace state`);
                 },
                 success: function() {
-                    settingsContainer.addClass('hidden');
+                    
                 }
             });
         });
-
-        settings.abortButton.on('click', function () {
-            settingsContainer.addClass('hidden');
-        });
-
-        prevButton.on('click', function() {
-            if(currentIndex === null || currentIndex === undefined) currentIndex = entries.length-1;
-            else if(currentIndex > 0) {
-                currentIndex--;
-            }
-            selectByIndex(currentIndex);
-        });
-
-        nextButton.on('click', function() {
-            if(currentIndex === null || currentIndex === undefined) currentIndex = 0;
-            else if(currentIndex < entries.length-1) {
-                currentIndex++;
-            }
-            selectByIndex(currentIndex);
-        });
-
-        //
-        // Shortcuts for browsing next/prev steps
-        //
-        RED.actions.add("msg-tracer:msg-tracer-next-node", function() {
-            nextButton.trigger('click');
-        });
-
-        RED.actions.add("msg-tracer:msg-tracer-previous-node", function() {
-            prevButton.trigger('click');
-        });
-
-
-        //
-        // Shortcuts for breakpoints
-        //
-        RED.actions.add("msg-tracer:msg-tracer-toggle-breakpoint", function() {
-            toggleBpButton.trigger('click');
-        });
-
-        RED.actions.add("msg-tracer:msg-tracer-bp-release-all", function() {
-            releaseAllButton.trigger('click');
-        });
-
-        RED.actions.add("msg-tracer:msg-tracer-bp-step-all", function() {
-            stepAllButton.trigger('click');
-        });
-
-        RED.actions.add("msg-tracer:msg-tracer-bp-kill-all", function() {
-            killAllButton.trigger('click');
-        });
-
-        toggleButton.on('click', function() {
-            const newCfg = {uiTrace: !isOn};
-            $.ajax({
-                url: 'msg-tracer/config',
-                contentType: "application/json",
-                dataType:'json',
-                data: JSON.stringify(newCfg),
-                type: 'PATCH',
-                error: function() {
-                    alert(`Failed to change trace state`);
-                }
-            });
-        })
     })
 </script>
