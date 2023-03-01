@@ -78,7 +78,7 @@ module.exports = function (RED) {
             payloadSafe += e.message
         }
         let toLog = safeStringify({
-            nodered: NODE_RED_NAME,
+            nodered: config.serviceName,
             nodeId: node.id,
             nodeName: node.name,
             traceId,
@@ -113,11 +113,11 @@ module.exports = function (RED) {
         let name = node.name || node.label;
         const provider = new BasicTracerProvider({
             generalLimits: {
-                attributeValueLengthLimit: 2048,
+                attributeValueLengthLimit: 8192,
                 attributeCountLimit: 256
             },
             spanLimits: {
-                attributeValueLengthLimit: 2048,
+                attributeValueLengthLimit: 8192,
                 attributeCountLimit: 256,
                 linkCountLimit: 256,
                 eventCountLimit: 256
@@ -203,7 +203,7 @@ module.exports = function (RED) {
 
     RED.hooks.add("onReceive", (sendEvents) => {
         const msg = sendEvents.msg;
-        if(msg.OZTdoNotTrace || msg._msgid){
+        if(msg.OZTdoNotTrace || !msg._msgid){
             return;
         }
         let msgId = msg._msgid;
@@ -251,7 +251,7 @@ module.exports = function (RED) {
 
     RED.hooks.add("onComplete", (completeEvent) => {
         const msg = completeEvent.msg;
-        if(msg.OZTdoNotTrace || msg._msgid){
+        if(msg.OZTdoNotTrace || !msg._msgid){
             return;
         }
         let destination = completeEvent.node.node;
