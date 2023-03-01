@@ -1,6 +1,6 @@
 {
   "name": "@ozmap/node-red-contrib-oztracer",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Basic implementations of opentelemetry as tracer inside nodered",
   "node-red": {
     "nodes": {

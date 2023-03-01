@@ -161,7 +161,7 @@ module.exports = function (RED) {
 
     RED.hooks.add("preRoute", (sendEvents) => {
         const msg = sendEvents.msg;
-        if(msg.OZTdoNotTrace){
+        if(msg.OZTdoNotTrace || !msg._msgid){
             return;
         }
         let msgId = msg._msgid;
@@ -195,13 +195,15 @@ module.exports = function (RED) {
                 spans: {}
             }
         }
-
-        messageSpans[msgId].changedAt = new Date().getTime();
+        
+        if(messageSpans[msgId]){
+            messageSpans[msgId].changedAt = new Date().getTime();
+        }
     });
 
     RED.hooks.add("onReceive", (sendEvents) => {
         const msg = sendEvents.msg;
-        if(msg.OZTdoNotTrace){
+        if(msg.OZTdoNotTrace || msg._msgid){
             return;
         }
         let msgId = msg._msgid;
@@ -242,12 +244,14 @@ module.exports = function (RED) {
             setSpanOnMessage(msg, ctx);
         }
 
-        messageSpans[msgId].changedAt = new Date().getTime();
+        if(messageSpans[msgId]){
+            messageSpans[msgId].changedAt = new Date().getTime();
+        }
     });
 
     RED.hooks.add("onComplete", (completeEvent) => {
         const msg = completeEvent.msg;
-        if(msg.OZTdoNotTrace){
+        if(msg.OZTdoNotTrace || msg._msgid){
             return;
         }
         let destination = completeEvent.node.node;
@@ -268,7 +272,9 @@ module.exports = function (RED) {
             messageSpans[msgId].main.end();
         }
 
-        messageSpans[msgId].changedAt = new Date().getTime();
+        if(messageSpans[msgId]){
+            messageSpans[msgId].changedAt = new Date().getTime();
+        }
     })
 
     //Verifica a cada 5 minutos se existem mensagens mais antigas do que 20min e fecha e exclui. ( evitar memory leak )
