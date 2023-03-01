@@ -11,38 +11,60 @@ const safeStringify = require('fast-safe-stringify')
 
 const NODE_RED_NAME = process.env.NODE_RED_NAME || "NodeRedUnknow";
 
-const tracers = {};
+let tracers = {};
+let messageSpans = {};
 
 module.exports = function (RED) {
+    try{
     const msgTracerConfigFolderPath = path.resolve(RED.settings.userDir, 'oztracer');
     const msgTracerConfigFile = path.join(msgTracerConfigFolderPath, 'config.json');
     let config = null;
+
+    RED.events.on('flows:started', setTracersOnFlows); // quando os flows estiverem prontos, disponibilizar o tracer neles
+    
+
     if(fse.existsSync(msgTracerConfigFile)){
         config = fse.readJSONSync(msgTracerConfigFile);
     }else{
         saveConfig(); // Se não existe, cria o primeiro config
     }
+    //depois de criar a config basica, enviar para ainterface
+    RED.comms.publish("oztracer/config", config, true); 
     
-    RED.comms.publish("oztracer/config", config, true); //inicial
+    
 
-    function saveConfig() {
-        console.log("Salvado config em:"+msgTracerConfigFile)
-        fse.ensureDirSync(msgTracerConfigFolderPath);
-        if(!config){
+    function saveConfig(newConfig) {
+        let restartServices = false;
+        if(!config){ //Primeira vez, ainda não existe config
             config = {};
             config.urlEndPoint="http://grafana-agent:4318/v1/traces",
-            config.serviceName=NODE_RED_NAME
+            config.serviceName=NODE_RED_NAME;
+            config.OZTlogToAttribute=false;
+            config.OZTlogToConsole=false;
         }
-        fse.writeJSONSync(msgTracerConfigFile, config)
+        if(newConfig){
+          if(config.urlEndPoint != newConfig.urlEndPoint){
+            restartServices=true;
+          }
+          config = newConfig;  
+        }
+        fse.ensureDirSync(msgTracerConfigFolderPath);        
+        fse.writeJSONSync(msgTracerConfigFile, config);
+        RED.comms.publish("oztracer/config", config, true); // atualizar a interface com os novos configs;
+        if(restartServices){
+            messageSpans = {};
+            tracers = {};
+            setTracersOnFlows();
+        }
     };
 
-    RED.events.on('flows:started', function () {
+    function setTracersOnFlows(){
         RED.nodes.eachNode(function (node) {
             if (node.type === 'tab' || node.type.startsWith('subflow:')) {
                 tracers[node.id] = createTracer(node);
             }
         });
-    });
+    }
 
     function toLokiLog(msg, span, node) {
         let traceId = span.spanContext().traceId;
@@ -65,23 +87,21 @@ module.exports = function (RED) {
             payload: payloadSafe
         })
 
-        if (msg.logToAttribute) {
+        if (msg.OZTlogToAttribute || (config && config.OZTlogToAttribute)) {
             span.setAttribute('log', toLog)
         }
-        if (msg.logToConsole) {
+        if (msg.OZTlogToConsole || (config && config.OZTlogToConsole)) {
             console.log(toLog);
         }
     }
 
     RED.httpAdmin.put('/oztracer/config', bodyParser.json(), function(req, res) {
         if(req.body && req.body.constructor === {}.constructor) {
-            config =  req.body;
-            saveConfig()
+            saveConfig(req.body);
         } else {
             res.status(202).send({error: 'Must send json object {...}'});
         }
     });
-
 
 
     function createTracer(node) {
@@ -139,10 +159,11 @@ module.exports = function (RED) {
         msg.headers.tracestate = output.tracestate;
     }
 
-    const messageSpans = {};
-
     RED.hooks.add("preRoute", (sendEvents) => {
         const msg = sendEvents.msg;
+        if(msg.OZTdoNotTrace){
+            return;
+        }
         let msgId = msg._msgid;
         const source = sendEvents.source.node;
         const tracer = tracers[source.z];
@@ -169,14 +190,20 @@ module.exports = function (RED) {
             let mainSpan = tracer.startSpan(source.name, { attributes: {} }, ctx);
             toLokiLog(msg, mainSpan, source);
             messageSpans[msgId] = {
+                changedAt: new Date().getTime(),
                 main: mainSpan,
                 spans: {}
             }
         }
+
+        messageSpans[msgId].changedAt = new Date().getTime();
     });
 
     RED.hooks.add("onReceive", (sendEvents) => {
         const msg = sendEvents.msg;
+        if(msg.OZTdoNotTrace){
+            return;
+        }
         let msgId = msg._msgid;
         const destination = sendEvents.destination.node;
         const tracer = tracers[destination.z];
@@ -190,6 +217,7 @@ module.exports = function (RED) {
         if (!messageSpans[msgId]) { //Primeira span
             let mainSpan = tracer.startSpan('Main');
             messageSpans[msgId] = {
+                changedAt: new Date().getTime(),
                 main: mainSpan,
                 spans: {}
             }
@@ -213,11 +241,16 @@ module.exports = function (RED) {
         if (destination.type === "http request") { //Adiciona a mensagem no contexto
             setSpanOnMessage(msg, ctx);
         }
+
+        messageSpans[msgId].changedAt = new Date().getTime();
     });
 
     RED.hooks.add("onComplete", (completeEvent) => {
-        let destination = completeEvent.node.node;
         const msg = completeEvent.msg;
+        if(msg.OZTdoNotTrace){
+            return;
+        }
+        let destination = completeEvent.node.node;
         const msgId = msg.oznparentmessage ? msg.oznparentmessage : msg._msgid;
         const span = messageSpans[msgId].spans[destination.id]
         span.span.end();
@@ -234,5 +267,21 @@ module.exports = function (RED) {
         if (allClosed) {
             messageSpans[msgId].main.end();
         }
+
+        messageSpans[msgId].changedAt = new Date().getTime();
     })
+
+    //Verifica a cada 5 minutos se existem mensagens mais antigas do que 20min e fecha e exclui. ( evitar memory leak )
+    setInterval(() =>{
+        let now = new Date().getTime();
+        for(let msgId in messageSpans){
+            if(messageSpans[msgId] && messageSpans[msgId].changedAt && (now - messageSpans[msgId].changedAt) > 20*60*1000 ){
+                messageSpans[msgId].end();
+                delete messageSpans[msgId];
+            }
+        }
+    },5*60*1000);
+    }catch(e){
+        console.error("Erro grave no OZTracer. "+e.message);
+    }
 };

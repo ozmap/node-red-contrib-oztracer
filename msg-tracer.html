@@ -22,11 +22,32 @@
         const noderedAdminUrl = window.location.href.split('#')[0];
         let content = `
             <div id="tracer-tabs">
-                <h4>Configurações do sistema:</h4>
+                <h2>Configurações do sistema:</h2>
                 <div>
                     <br/>
-                    EndPoint:<input id="url-end-point"><br/>
-                    ServiceName:<input id="service-name"><br/><br/>
+                    <span>
+                        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;EndPoint:<input id="url-end-point">
+                    </span>
+                    <br/><br/>
+                    <span>
+                        ServiceName:<input id="service-name">
+                    </span>
+                    <div style="margin: 5px">
+                    <h4>Logar todos os nós. (cuidado, pode gerar muito log, use pra debug/testes apenas)</h4>
+                    Logar no console: <input type="checkbox" id="OZTlogToConsole" name="OZTlogToConsole" value="true"><br>
+                    Logar nos atributos: <input type="checkbox" id="OZTlogToAttribute" name="OZTlogToAttribute" value="true"><br>
+                    <i>Logar nos atributos, adiciona o log diretamente no span do tracer<i>
+                    </div>
+                    
+                    <h3>Configurações por mensagem</h3>
+                    <b>msg.OZTlogToAttribute</b><br/>
+                    &nbsp;&nbsp;&nbsp;&nbsp;Logar nos atributos do span, adiciona o log diretamente no span do tracer<br/><br/>
+                    <b>msg.OZTlogToConsole</b>
+                    &nbsp;&nbsp;&nbsp;&nbsp;Vai logar diretamente no console e poder ser coletado pelo promtail or grafana-agent e enviado ao loki<br/><br/>
+                    <h3> Para evitar que uma mensagem gere tracing e logs, adicione na mensagem o seguinte atributo</h3>
+                    <b>msg.OZTdoNotTrace</b><br/>
+                    &nbsp;&nbsp;&nbsp;&nbsp;Vai logar diretamente no console e poder ser coletado pelo promtail or grafana-agent e enviado ao loki<br/><br/>
+                    <br><br>
                     <button id="save-button">Salvar</button>
                 </div>
               
@@ -54,18 +75,28 @@
         let config = {};
         let serviceName = $("#service-name");
         let urlEndPoint = $("#url-end-point");
+        let OZTlogToAttribute = $("#OZTlogToAttribute");
+        let OZTlogToConsole = $("#OZTlogToConsole");
         let saveButton = $("#save-button");
 
         RED.comms.subscribe("oztracer/config", function (topic, cfg) {
             serviceName.val(cfg.serviceName);
             urlEndPoint.val(cfg.urlEndPoint);
+            if(cfg.OZTlogToAttribute){
+                OZTlogToAttribute.prop("checked", true);
+            }
+            if(cfg.OZTlogToConsole){
+                OZTlogToConsole.prop("checked", true);
+            }
         });
 
-       
         saveButton.on('click', function () {
             const putConfig = {
                 serviceName: serviceName.val(),
-                urlEndPoint: urlEndPoint.val()
+                urlEndPoint: urlEndPoint.val(),
+                OZTlogToAttribute: OZTlogToAttribute.is(":checked"),
+                OZTlogToConsole: OZTlogToConsole.is(":checked")
+
             };
 
             $.ajax({
