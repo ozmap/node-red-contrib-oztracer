@@ -203,10 +203,10 @@ module.exports = function (RED) {
 
     RED.hooks.add("onReceive", (sendEvents) => {
         const msg = sendEvents.msg;
-        if(msg.OZTdoNotTrace || !msg._msgid){
-            return;
-        }
         let msgId = msg._msgid;
+        if(msg.OZTdoNotTrace || !msgId){
+            return;
+        }        
         const destination = sendEvents.destination.node;
         const tracer = tracers[destination.z];
 
@@ -251,11 +251,12 @@ module.exports = function (RED) {
 
     RED.hooks.add("onComplete", (completeEvent) => {
         const msg = completeEvent.msg;
-        if(msg.OZTdoNotTrace || !msg._msgid){
+        const msgId = msg.oznparentmessage ? msg.oznparentmessage : msg._msgid;
+        if(msg.OZTdoNotTrace || !msg._msgid || !messageSpans[msgId]){
             return;
         }
         let destination = completeEvent.node.node;
-        const msgId = msg.oznparentmessage ? msg.oznparentmessage : msg._msgid;
+        
         const span = messageSpans[msgId].spans[destination.id]
         span.span.end();
         span.closed = true;
