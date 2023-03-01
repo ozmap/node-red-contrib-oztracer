@@ -276,7 +276,7 @@ module.exports = function (RED) {
         let now = new Date().getTime();
         for(let msgId in messageSpans){
             if(messageSpans[msgId] && messageSpans[msgId].changedAt && (now - messageSpans[msgId].changedAt) > 20*60*1000 ){
-                messageSpans[msgId].end();
+                messageSpans[msgId].main.end();
                 delete messageSpans[msgId];
             }
         }
